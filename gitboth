@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# gitboth — commit lalu push ke setiap remote yang unik (GitHub + GitLab, dst).
+set -euo pipefail
+
+PROG=${0##*/}
+STAGE_ALL=1
+DRY_RUN=0
+MESSAGE=""
+
+usage() {
+	cat <<EOF
+Pemakaian: $PROG [-m] "pesan commit" [opsi]
+
+Commit perubahan lalu push branch aktif ke setiap remote unik.
+Remote yang menunjuk URL push yang sama hanya dipush sekali.
+
+Opsi:
+  -m, --message <teks>  pesan commit (boleh juga sebagai argumen posisional)
+  -s, --staged          hanya commit yang sudah di-stage (tanpa 'git add -A')
+  -n, --dry-run         tampilkan rencana, tanpa mengubah index/commit/push
+  -h, --help            tampilkan bantuan ini
+EOF
+}
+
+die() {
+	printf '%s: %s\n' "$PROG" "$1" >&2
+	exit 1
+}
+
+while [ $# -gt 0 ]; do
+	case $1 in
+	-m | --message)
+		[ $# -ge 2 ] || die "opsi $1 butuh argumen"
+		MESSAGE=$2
+		shift 2
+		;;
+	-m?*)
+		MESSAGE=${1#-m}
+		shift
+		;;
+	-s | --staged) STAGE_ALL=0; shift ;;
+	-n | --dry-run) DRY_RUN=1; shift ;;
+	-h | --help) usage; exit 0 ;;
+	--)
+		shift
+		[ $# -gt 0 ] || die "pesan commit kosong"
+		MESSAGE=$1
+		shift
+		;;
+	-*) die "opsi tidak dikenal: $1 (lihat --help)" ;;
+	*)
+		[ -z "$MESSAGE" ] || die "pesan commit ganda: '$MESSAGE' dan '$1'"
+		MESSAGE=$1
+		shift
+		;;
+	esac
+done
+
+git rev-parse --git-dir >/dev/null 2>&1 || die "bukan repository git"
+
+BRANCH=$(git symbolic-ref --short -q HEAD) ||
+	die "HEAD detached; checkout branch dulu"
+
+# Kumpulkan URL push unik lintas remote; label = nama remote pertama yang memakainya.
+host_of() {
+	local u=${1#*://}
+	case $u in *@*) u=${u##*@} ;; esac
+	u=${u%%/*}
+	printf '%s' "${u%%:*}"
+}
+
+URLS=()
+LABELS=()
+SEEN=$'\n'
+while IFS= read -r remote; do
+	while IFS= read -r url; do
+		[ -n "$url" ] || continue
+		case $SEEN in
+		*$'\n'"$url"$'\n'*) continue ;;
+		esac
+		SEEN+="$url"$'\n'
+		URLS+=("$url")
+		LABELS+=("$remote ($(host_of "$url"))")
+	done < <(git remote get-url --push --all "$remote")
+done < <(git remote)
+
+[ ${#URLS[@]} -gt 0 ] || die "tidak ada remote terpasang"
+
+if [ "$DRY_RUN" -eq 1 ]; then
+	printf '[dry-run] branch: %s, remote: %s\n' "$BRANCH" "${LABELS[*]}"
+	printf '[dry-run] perubahan:\n'
+	git status --short
+	if [ -n "$MESSAGE" ]; then
+		printf '[dry-run] commit: %s\n' "$MESSAGE"
+	else
+		printf '[dry-run] commit: (pesan belum diberikan)\n'
+	fi
+	for label in "${LABELS[@]}"; do
+		printf '[dry-run] push: %s %s\n' "$label" "$BRANCH"
+	done
+	exit 0
+fi
+
+if [ -n "$(git status --porcelain)" ] && [ -z "$MESSAGE" ]; then
+	die "ada perubahan tapi pesan commit kosong; pakai: $PROG \"pesan\""
+fi
+
+if [ "$STAGE_ALL" -eq 1 ]; then
+	git add -A
+fi
+
+if git diff --cached --quiet; then
+	printf '%s: tidak ada perubahan untuk di-commit, lanjut push\n' "$PROG"
+else
+	git commit -q -m "$MESSAGE"
+	printf '%s: commit dibuat: %s\n' "$PROG" "$(git log -1 --format='%h %s')"
+fi
+
+for i in "${!URLS[@]}"; do
+	printf '%s: push %s -> %s\n' "$PROG" "$BRANCH" "${LABELS[$i]}"
+	git push --quiet "${URLS[$i]}" "refs/heads/$BRANCH:refs/heads/$BRANCH" ||
+		die "push ke '${LABELS[$i]}' gagal"
+done
+
+printf '%s: selesai (%d remote)\n' "$PROG" "${#URLS[@]}"
