@@ -6,6 +6,7 @@ PROG=${0##*/}
 STAGE_ALL=1
 DRY_RUN=0
 MESSAGE=""
+REMOTE_PATTERNS=()
 
 usage() {
 	cat <<EOF
@@ -17,8 +18,11 @@ Remote yang menunjuk URL push yang sama hanya dipush sekali.
 Opsi:
   -m, --message <teks>  pesan commit (boleh juga sebagai argumen posisional)
   -s, --staged          hanya commit yang sudah di-stage (tanpa 'git add -A')
+  -r, --remote <pola>   hanya push remote yang namanya cocok (boleh diulang)
   -n, --dry-run         tampilkan rencana, tanpa mengubah index/commit/push
   -h, --help            tampilkan bantuan ini
+
+Kalau satu remote gagal, remote lain tetap dipush dan exit code jadi 1.
 EOF
 }
 
@@ -39,6 +43,11 @@ while [ $# -gt 0 ]; do
 		shift
 		;;
 	-s | --staged) STAGE_ALL=0; shift ;;
+	-r | --remote)
+		[ $# -ge 2 ] || die "opsi $1 butuh argumen"
+		REMOTE_PATTERNS+=("$2")
+		shift 2
+		;;
 	-n | --dry-run) DRY_RUN=1; shift ;;
 	-h | --help) usage; exit 0 ;;
 	--)
@@ -72,7 +81,17 @@ host_of() {
 URLS=()
 LABELS=()
 SEEN=$'\n'
+matches_filter() {
+	[ ${#REMOTE_PATTERNS[@]} -eq 0 ] && return 0
+	local pat
+	for pat in "${REMOTE_PATTERNS[@]}"; do
+		# shellcheck disable=SC2053
+		[[ $1 == $pat ]] && return 0
+	done
+	return 1
+}
 while IFS= read -r remote; do
+	matches_filter "$remote" || continue
 	while IFS= read -r url; do
 		[ -n "$url" ] || continue
 		case $SEEN in
@@ -84,7 +103,12 @@ while IFS= read -r remote; do
 	done < <(git remote get-url --push --all "$remote")
 done < <(git remote)
 
-[ ${#URLS[@]} -gt 0 ] || die "tidak ada remote terpasang"
+if [ ${#URLS[@]} -eq 0 ]; then
+	if [ ${#REMOTE_PATTERNS[@]} -gt 0 ]; then
+		die "tidak ada remote yang cocok dengan: ${REMOTE_PATTERNS[*]}"
+	fi
+	die "tidak ada remote terpasang"
+fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
 	printf '[dry-run] branch: %s, remote: %s\n' "$BRANCH" "${LABELS[*]}"
@@ -105,6 +129,17 @@ if [ -n "$(git status --porcelain)" ] && [ -z "$MESSAGE" ]; then
 	die "ada perubahan tapi pesan commit kosong; pakai: $PROG \"pesan\""
 fi
 
+for marker in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; do
+	if [ -e "$(git rev-parse --git-path "$marker")" ]; then
+		die "repo sedang dalam proses ${marker%_HEAD}; selesaikan atau batalkan dulu"
+	fi
+done
+for dir in rebase-merge rebase-apply; do
+	if [ -d "$(git rev-parse --git-path "$dir")" ]; then
+		die "repo sedang rebase; selesaikan atau batalkan dulu"
+	fi
+done
+
 if [ "$STAGE_ALL" -eq 1 ]; then
 	git add -A
 fi
@@ -116,10 +151,22 @@ else
 	printf '%s: commit dibuat: %s\n' "$PROG" "$(git log -1 --format='%h %s')"
 fi
 
+FAILED=()
+ERRLOG=$(mktemp)
+trap 'rm -f "$ERRLOG"' EXIT
 for i in "${!URLS[@]}"; do
 	printf '%s: push %s -> %s\n' "$PROG" "$BRANCH" "${LABELS[$i]}"
-	git push --quiet "${URLS[$i]}" "refs/heads/$BRANCH:refs/heads/$BRANCH" ||
-		die "push ke '${LABELS[$i]}' gagal"
+	if git push --quiet "${URLS[$i]}" "refs/heads/$BRANCH:refs/heads/$BRANCH" 2>"$ERRLOG"; then
+		continue
+	fi
+	FAILED+=("${LABELS[$i]}")
+	sed 's/^/    /' "$ERRLOG" >&2
 done
+
+if [ ${#FAILED[@]} -gt 0 ]; then
+	printf '%s: %d dari %d remote gagal: %s\n' \
+		"$PROG" "${#FAILED[@]}" "${#URLS[@]}" "${FAILED[*]}" >&2
+	exit 1
+fi
 
 printf '%s: selesai (%d remote)\n' "$PROG" "${#URLS[@]}"

@@ -10,7 +10,8 @@ dan otomatis melewati remote yang URL push-nya duplikat supaya tidak push dua ka
 ```bash
 gitboth "fix: perbaiki typo di README"
 gitboth -s "chore: commit yang sudah di-stage saja"
-gitboth -n "test: lihat rencana dulu"     # dry-run, tidak mengubah apa pun
+gitboth -r github "feat: push ke GitHub saja"   # pola nama remote, boleh diulang
+gitboth -n "test: lihat rencana dulu"           # dry-run, tidak mengubah apa pun
 ```
 
 Tanpa pesan, `gitboth` hanya push commit yang belum terkirim:
@@ -21,9 +22,11 @@ gitboth
 
 ## Yang dilakukan
 
-1. `git add -A` (kecuali `-s`).
-2. Commit bila ada perubahan; kalau tidak ada, dilewati.
-3. Push branch aktif ke setiap remote unik dengan `refs/heads/<branch>:refs/heads/<branch>`.
+1. Tolak jalan bila repo sedang merge, cherry-pick, revert, atau rebase.
+2. `git add -A` (kecuali `-s`).
+3. Commit bila ada perubahan; kalau tidak ada, dilewati.
+4. Push branch aktif ke setiap remote unik dengan `refs/heads/<branch>:refs/heads/<branch>`.
+5. Kalau satu remote gagal, remote lain tetap dipush, lalu exit code 1 dengan ringkasan remote yang gagal.
 
 Setiap URL push yang sama hanya dipush sekali. Jadi remote `origin` yang punya
 dua push URL (GitLab + GitHub) cukup satu jalan, dan remote lain yang menunjuk

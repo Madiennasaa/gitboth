@@ -65,6 +65,37 @@ echo "lain" >lain.txt
 "$SCRIPT" -s "chore: staged saja" >/dev/null 2>&1
 if git ls-tree -r --name-only HEAD | grep -qx 'lain.txt'; then no "-s tidak ikut untracked"; else ok "-s tidak ikut untracked"; fi
 
+# 7. -r hanya push remote yang dipilih
+new_repo
+"$SCRIPT" -r gitlab "feat: hanya gitlab" >/dev/null 2>&1
+if [ -n "$(head_of "$TMP/b.git")" ] && [ -z "$(head_of "$TMP/a.git")" ]; then
+	ok "-r hanya push remote terpilih"
+else
+	no "-r hanya push remote terpilih"
+fi
+if "$SCRIPT" -r tidakada "x" >/dev/null 2>&1; then no "-r tanpa match ditolak"; else ok "-r tanpa match ditolak"; fi
+
+# 8. satu remote gagal: remote lain tetap dipush, exit 1
+new_repo
+git remote set-url --push gitlab "$TMP/tidak-ada.git"
+if "$SCRIPT" "fix: remote kedua mati" >/dev/null 2>&1; then
+	no "push gagal memberi exit 1"
+else
+	ok "push gagal memberi exit 1"
+fi
+[ -n "$(head_of "$TMP/a.git")" ] && ok "remote sehat tetap terpush" || no "remote sehat tetap terpush"
+
+# 9. tolak saat merge belum selesai
+new_repo
+echo "deadbeef" >.git/MERGE_HEAD
+before=$(git rev-parse HEAD 2>/dev/null || echo "-")
+if "$SCRIPT" "chore: saat merge" >/dev/null 2>&1; then
+	no "merge belum selesai ditolak"
+else
+	after=$(git rev-parse HEAD 2>/dev/null || echo "-")
+	[ "$before" = "$after" ] && ok "merge belum selesai ditolak" || no "merge belum selesai ditolak"
+fi
+
 # 6. bukan repo git -> error
 mkdir -p "$TMP/plain" && cd "$TMP/plain"
 if "$SCRIPT" "x" >/dev/null 2>&1; then no "tolak non-repo"; else ok "tolak non-repo"; fi
