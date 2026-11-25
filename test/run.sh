@@ -96,6 +96,12 @@ else
 	[ "$before" = "$after" ] && ok "merge belum selesai ditolak" || no "merge belum selesai ditolak"
 fi
 
+# 10. -c memverifikasi ref remote setelah push
+new_repo
+out=$("$SCRIPT" -c "feat: dengan verifikasi" 2>&1) || no "-c exit 0"
+n=$(grep -c "^gitboth: ok " <<<"$out" || true)
+[ "$n" = 2 ] && ok "-c verifikasi kedua remote" || no "-c verifikasi kedua remote (dapat: $n)"
+
 # 6. bukan repo git -> error
 mkdir -p "$TMP/plain" && cd "$TMP/plain"
 if "$SCRIPT" "x" >/dev/null 2>&1; then no "tolak non-repo"; else ok "tolak non-repo"; fi

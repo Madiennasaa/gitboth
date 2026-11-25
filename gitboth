@@ -5,6 +5,7 @@ set -euo pipefail
 PROG=${0##*/}
 STAGE_ALL=1
 DRY_RUN=0
+CHECK=0
 MESSAGE=""
 REMOTE_PATTERNS=()
 
@@ -19,6 +20,7 @@ Opsi:
   -m, --message <teks>  pesan commit (boleh juga sebagai argumen posisional)
   -s, --staged          hanya commit yang sudah di-stage (tanpa 'git add -A')
   -r, --remote <pola>   hanya push remote yang namanya cocok (boleh diulang)
+  -c, --check           setelah push, pastikan ref remote sama dengan commit lokal
   -n, --dry-run         tampilkan rencana, tanpa mengubah index/commit/push
   -h, --help            tampilkan bantuan ini
 
@@ -48,6 +50,7 @@ while [ $# -gt 0 ]; do
 		REMOTE_PATTERNS+=("$2")
 		shift 2
 		;;
+	-c | --check) CHECK=1; shift ;;
 	-n | --dry-run) DRY_RUN=1; shift ;;
 	-h | --help) usage; exit 0 ;;
 	--)
@@ -75,7 +78,8 @@ host_of() {
 	local u=${1#*://}
 	case $u in *@*) u=${u##*@} ;; esac
 	u=${u%%/*}
-	printf '%s' "${u%%:*}"
+	u=${u%%:*}
+	printf '%s' "${u:-lokal}"
 }
 
 URLS=()
@@ -122,6 +126,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
 	for label in "${LABELS[@]}"; do
 		printf '[dry-run] push: %s %s\n' "$label" "$BRANCH"
 	done
+	[ "$CHECK" -eq 0 ] || printf '[dry-run] check: ref remote dibandingkan dengan commit lokal\n'
 	exit 0
 fi
 
@@ -154,13 +159,21 @@ fi
 FAILED=()
 ERRLOG=$(mktemp)
 trap 'rm -f "$ERRLOG"' EXIT
+LOCAL_SHA=$(git rev-parse "refs/heads/$BRANCH")
 for i in "${!URLS[@]}"; do
 	printf '%s: push %s -> %s\n' "$PROG" "$BRANCH" "${LABELS[$i]}"
-	if git push --quiet "${URLS[$i]}" "refs/heads/$BRANCH:refs/heads/$BRANCH" 2>"$ERRLOG"; then
+	if ! git push --quiet "${URLS[$i]}" "refs/heads/$BRANCH:refs/heads/$BRANCH" 2>"$ERRLOG"; then
+		FAILED+=("${LABELS[$i]}")
+		sed 's/^/    /' "$ERRLOG" >&2
 		continue
 	fi
-	FAILED+=("${LABELS[$i]}")
-	sed 's/^/    /' "$ERRLOG" >&2
+	[ "$CHECK" -eq 1 ] || continue
+	REMOTE_SHA=$(git ls-remote "${URLS[$i]}" "refs/heads/$BRANCH" 2>/dev/null | awk '{print $1; exit}')
+	if [ "$REMOTE_SHA" = "$LOCAL_SHA" ]; then
+		printf '%s: ok %s %s\n' "$PROG" "${LABELS[$i]}" "${LOCAL_SHA:0:7}"
+	else
+		FAILED+=("${LABELS[$i]} (ref remote ${REMOTE_SHA:0:7} != lokal ${LOCAL_SHA:0:7})")
+	fi
 done
 
 if [ ${#FAILED[@]} -gt 0 ]; then
