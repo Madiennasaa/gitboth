@@ -6,6 +6,7 @@ PROG=${0##*/}
 STAGE_ALL=1
 DRY_RUN=0
 CHECK=0
+FORCE=0
 MESSAGE=""
 REMOTE_PATTERNS=()
 
@@ -21,6 +22,8 @@ Opsi:
   -s, --staged          hanya commit yang sudah di-stage (tanpa 'git add -A')
   -r, --remote <pola>   hanya push remote yang namanya cocok (boleh diulang)
   -c, --check           setelah push, pastikan ref remote sama dengan commit lokal
+  -f, --force           timpa remote pakai --force-with-lease (hanya bila remote
+                        belum bergerak; dipakai setelah rebase/amend)
   -n, --dry-run         tampilkan rencana, tanpa mengubah index/commit/push
   -h, --help            tampilkan bantuan ini
 
@@ -51,6 +54,7 @@ while [ $# -gt 0 ]; do
 		shift 2
 		;;
 	-c | --check) CHECK=1; shift ;;
+	-f | --force) FORCE=1; shift ;;
 	-n | --dry-run) DRY_RUN=1; shift ;;
 	-h | --help) usage; exit 0 ;;
 	--)
@@ -127,6 +131,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
 		printf '[dry-run] push: %s %s\n' "$label" "$BRANCH"
 	done
 	[ "$CHECK" -eq 0 ] || printf '[dry-run] check: ref remote dibandingkan dengan commit lokal\n'
+	[ "$FORCE" -eq 0 ] || printf '[dry-run] force: --force-with-lease (remote hanya ditimpa bila belum bergerak)\n'
 	exit 0
 fi
 
@@ -162,7 +167,15 @@ trap 'rm -f "$ERRLOG"' EXIT
 LOCAL_SHA=$(git rev-parse "refs/heads/$BRANCH")
 for i in "${!URLS[@]}"; do
 	printf '%s: push %s -> %s\n' "$PROG" "$BRANCH" "${LABELS[$i]}"
-	if ! git push --quiet "${URLS[$i]}" "refs/heads/$BRANCH:refs/heads/$BRANCH" 2>"$ERRLOG"; then
+	PUSH_ARGS=()
+	if [ "$FORCE" -eq 1 ]; then
+		# Lease memakai SHA remote saat ini: kalau orang lain sudah push, push ditolak
+		# (bukan menimpa buta seperti --force biasa).
+		LEASE_SHA=$(git ls-remote "${URLS[$i]}" "refs/heads/$BRANCH" 2>/dev/null | awk '{print $1; exit}')
+		PUSH_ARGS+=("--force-with-lease=refs/heads/$BRANCH:$LEASE_SHA")
+	fi
+	if ! git push --quiet ${PUSH_ARGS[@]+"${PUSH_ARGS[@]}"} \
+		"${URLS[$i]}" "refs/heads/$BRANCH:refs/heads/$BRANCH" 2>"$ERRLOG"; then
 		FAILED+=("${LABELS[$i]}")
 		sed 's/^/    /' "$ERRLOG" >&2
 		continue

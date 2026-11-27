@@ -102,6 +102,14 @@ out=$("$SCRIPT" -c "feat: dengan verifikasi" 2>&1) || no "-c exit 0"
 n=$(grep -c "^gitboth: ok " <<<"$out" || true)
 [ "$n" = 2 ] && ok "-c verifikasi kedua remote" || no "-c verifikasi kedua remote (dapat: $n)"
 
+# 11. -f menimpa remote setelah amend, tanpa -f push ditolak
+new_repo
+"$SCRIPT" "feat: awal" >/dev/null 2>&1
+git commit -q --amend -m "feat: awal (amend)"
+if "$SCRIPT" >/dev/null 2>&1; then no "non-fast-forward ditolak tanpa -f"; else ok "non-fast-forward ditolak tanpa -f"; fi
+out=$("$SCRIPT" -f 2>&1) || { no "-f menyelesaikan push"; cat <<<"$out"; }
+[ "$(head_of "$TMP/a.git")" = "$(git rev-parse HEAD)" ] && ok "-f menimpa remote" || no "-f menimpa remote"
+
 # 6. bukan repo git -> error
 mkdir -p "$TMP/plain" && cd "$TMP/plain"
 if "$SCRIPT" "x" >/dev/null 2>&1; then no "tolak non-repo"; else ok "tolak non-repo"; fi
