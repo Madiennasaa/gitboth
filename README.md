@@ -30,7 +30,8 @@ gitboth
 4. Push branch aktif ke setiap remote unik dengan `refs/heads/<branch>:refs/heads/<branch>`.
 5. Dengan `-c`, bandingkan `git ls-remote` tiap remote dengan commit lokal; ref yang berbeda dihitung gagal.
 6. Dengan `-f`, push memakai `--force-with-lease=<branch>:<sha remote>`; remote hanya ditimpa kalau belum bergerak, jadi tidak menimpa push orang lain.
-7. Kalau satu remote gagal, remote lain tetap dipush, lalu exit code 1 dengan ringkasan remote yang gagal.
+7. Setelah push sukses, `refs/remotes/<remote>/<branch>` disamakan dengan commit lokal supaya `git status` tidak menampilkan "ahead" palsu.
+8. Kalau satu remote gagal, remote lain tetap dipush, lalu exit code 1 dengan ringkasan remote yang gagal.
 
 Setiap URL push yang sama hanya dipush sekali. Jadi remote `origin` yang punya
 dua push URL (GitLab + GitHub) cukup satu jalan, dan remote lain yang menunjuk

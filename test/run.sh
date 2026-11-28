@@ -110,6 +110,16 @@ if "$SCRIPT" >/dev/null 2>&1; then no "non-fast-forward ditolak tanpa -f"; else 
 out=$("$SCRIPT" -f 2>&1) || { no "-f menyelesaikan push"; cat <<<"$out"; }
 [ "$(head_of "$TMP/a.git")" = "$(git rev-parse HEAD)" ] && ok "-f menimpa remote" || no "-f menimpa remote"
 
+# 12. ref tracking remote ikut disamakan setelah push
+new_repo
+"$SCRIPT" "feat: sync tracking" >/dev/null 2>&1
+if [ "$(git rev-parse refs/remotes/origin/main 2>/dev/null)" = "$(git rev-parse HEAD)" ] &&
+	[ "$(git rev-parse refs/remotes/gitlab/main 2>/dev/null)" = "$(git rev-parse HEAD)" ]; then
+	ok "tracking ref remote diperbarui"
+else
+	no "tracking ref remote diperbarui"
+fi
+
 # 6. bukan repo git -> error
 mkdir -p "$TMP/plain" && cd "$TMP/plain"
 if "$SCRIPT" "x" >/dev/null 2>&1; then no "tolak non-repo"; else ok "tolak non-repo"; fi

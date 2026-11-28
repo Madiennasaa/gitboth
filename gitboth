@@ -89,6 +89,19 @@ host_of() {
 URLS=()
 LABELS=()
 SEEN=$'\n'
+# Push ke URL tidak memperbarui refs/remotes/<remote>/<branch>, jadi `git status`
+# bisa tetap terlihat "ahead". Setelah push sukses, samakan ref tracking remote
+# yang URL push-nya sama dengan yang barusan dipush.
+sync_tracking() {
+	local url=$1 remote rurl
+	while IFS= read -r remote; do
+		while IFS= read -r rurl; do
+			[ "$rurl" = "$url" ] || continue
+			git update-ref "refs/remotes/$remote/$BRANCH" "$LOCAL_SHA"
+			break
+		done < <(git remote get-url --push --all "$remote")
+	done < <(git remote)
+}
 matches_filter() {
 	[ ${#REMOTE_PATTERNS[@]} -eq 0 ] && return 0
 	local pat
@@ -180,6 +193,7 @@ for i in "${!URLS[@]}"; do
 		sed 's/^/    /' "$ERRLOG" >&2
 		continue
 	fi
+	sync_tracking "${URLS[$i]}"
 	[ "$CHECK" -eq 1 ] || continue
 	REMOTE_SHA=$(git ls-remote "${URLS[$i]}" "refs/heads/$BRANCH" 2>/dev/null | awk '{print $1; exit}')
 	if [ "$REMOTE_SHA" = "$LOCAL_SHA" ]; then
